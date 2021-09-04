@@ -77,14 +77,7 @@ def ds_process_audio(ds, audio_file, file_handle, vtt):
 def main():
     global line_count
     print("AutoSub\n")
-        
-    parser = argparse.ArgumentParser(description="AutoSub")
-    parser.add_argument('--file', required=True,
-                        help='Input video file')
-    parser.add_argument('--vtt', dest="vtt", action="store_true",
-                        help='Output a vtt file with cue points for individual words instead of a srt file')
-    args = parser.parse_args()
-    
+         
     for x in os.listdir():
         if x.endswith(".pbmm"):
             print("Model: ", os.path.join(os.getcwd(), x))
@@ -105,6 +98,16 @@ def main():
     except:
         print("Invalid scorer file. Running inference using only model file\n")
 
+
+    parser = argparse.ArgumentParser(description="AutoSub")
+    parser.add_argument('--file', required=True,
+                        help='Input video file')
+    parser.add_argument('--vtt', dest="vtt", action="store_true",
+                        help='Output a vtt file with cue points for individual words instead of a srt file')
+    parser.add_argument('--overwrite', dest="overwrite", action="store_true",
+                        help='Force Overwrite if SRT or VTT exists?')
+    args = parser.parse_args()
+
     if os.path.isfile(args.file):
         input_file = args.file
         print("\nInput file:", input_file)
@@ -115,15 +118,30 @@ def main():
     base_directory = os.getcwd()
     output_directory = os.path.join(base_directory, "output")
     audio_directory = os.path.join(base_directory, "audio")
-    video_file_name = input_file.split(os.sep)[-1].split(".")[0]
+    video_file_name = os.path.splitext(os.path.split(input_file)[1])[0]
     audio_file_name = os.path.join(audio_directory, video_file_name + ".wav")
-    srt_file_name = os.path.join(output_directory, video_file_name + ".srt")
     srt_extension = ".srt" if not args.vtt else ".vtt"
     srt_file_name = os.path.join(output_directory, video_file_name + srt_extension)
+    
+    if os.path.exists(srt_file_name):
+        if args.overwrite:
+            try:
+                os.remove(srt_file_name)
+            except Exception as e:
+                sys.exit('ERROR: %s exists and it cannot be deleted. REASON: %s. Please rectify before re-running.' % (srt_file_name, e))
+        else:
+            sys.exit('ERROR: SRT file %s exists and I do not have permission to overwrite it. Please use --overwrite to proceed.' % (srt_file_name)) 
 
     # Clean audio/ directory 
-    shutil.rmtree(audio_directory)
-    os.mkdir(audio_directory)
+    for filename in os.listdir(audio_directory):
+        file_path = os.path.join(audio_directory, filename)
+        try:
+            if os.path.isfile(file_path) or os.path.islink(file_path):
+                os.unlink(file_path)
+            elif os.path.isdir(file_path):
+                shutil.rmtree(file_path)
+        except Exception as e:
+            print('Failed to delete %s. Reason: %s' % (file_path, e))
 
     # Extract audio from input video file
     extract_audio(input_file, audio_file_name)
@@ -140,13 +158,12 @@ def main():
         file_handle.write("Kind: captions\n\n")
     
     print("\nRunning inference:")
-    
-    for file in tqdm(sort_alphanumeric(os.listdir(audio_directory))):
-        audio_segment_path = os.path.join(audio_directory, file)
-        
-        # Dont run inference on the original audio file
-        if audio_segment_path.split(os.sep)[-1] != audio_file_name.split(os.sep)[-1]:
-            ds_process_audio(ds, audio_segment_path, file_handle, args.vtt)
+
+    audiofiles=sort_alphanumeric(os.listdir(audio_directory))
+    audiofiles.remove(os.path.split(audio_file_name)[1])
+
+    for file in tqdm(audiofiles):
+        ds_process_audio(ds, os.path.join(audio_directory, file), file_handle, args.vtt)
 
     if not args.vtt:        
         print("\nSRT file saved to", srt_file_name)
